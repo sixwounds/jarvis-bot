@@ -1,5 +1,8 @@
 import os
+import time
+import requests
 from datetime import datetime
+from threading import Thread
 from telebot import TeleBot, types
 from dotenv import load_dotenv
 from nlp_providers import GPTProvider, GeminiProvider, GigaChatProvider
@@ -23,7 +26,7 @@ MAX_HISTORY = 12
 def system_prompt():
     return {
         "role": "system",
-        "content": "Тебя зовут Джарвис. Ты умный, дружелюбный ассистент. Отвечай кратко и по делу."
+        "content": "Тебя зовут Джарвис. Ты умный, харизматичный ассистент. Общайся уверенно и по делу."
     }
 
 
@@ -34,10 +37,13 @@ def start(message):
     dialogs[uid] = [system_prompt()]
     bot.send_message(
         message.chat.id,
-        "👋 Привет! Я **Джарвис**.\n\n"
+        "👋 Привет! Я **Джарвис** — твой персональный AI.\n\n"
+        "Что я умею:\n"
+        "• отвечать как GPT, Gemini или GigaChat\n"
+        "• рисовать через Kandinsky\n\n"
         "Команды:\n"
         "/model — выбрать нейросеть\n"
-        "/draw <описание> — нарисовать картинку\n"
+        "/draw <описание> — создать изображение\n"
         "/reset — очистить память",
         parse_mode="Markdown"
     )
@@ -46,7 +52,7 @@ def start(message):
 @bot.message_handler(commands=["reset"])
 def reset_dialog(message):
     dialogs[message.from_user.id] = [system_prompt()]
-    bot.send_message(message.chat.id, "Память очищена 🧹")
+    bot.send_message(message.chat.id, "🧠 Память очищена")
 
 
 @bot.message_handler(commands=["model"])
@@ -60,7 +66,7 @@ def choose_model(message):
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
     user_models[call.from_user.id] = call.data
-    bot.answer_callback_query(call.id, f"Теперь активна модель: {call.data.upper()}")
+    bot.answer_callback_query(call.id, f"Активна модель: {call.data.upper()}")
 
 
 @bot.message_handler(commands=["draw"])
@@ -70,12 +76,12 @@ def draw(message):
         bot.send_message(message.chat.id, "Напиши описание после /draw")
         return
 
-    bot.send_message(message.chat.id, "🎨 Рисую через GigaChat, подожди...")
+    bot.send_message(message.chat.id, "🎨 Рисую...")
     try:
         img_url = providers["gigachat"].draw(prompt)
         bot.send_photo(message.chat.id, img_url)
     except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка генерации изображения: {e}")
+        bot.send_message(message.chat.id, f"Ошибка генерации: {e}")
 
 
 @bot.message_handler(func=lambda msg: True)
@@ -104,4 +110,14 @@ def chat(message):
     bot.send_message(message.chat.id, answer)
 
 
+def keep_alive():
+    while True:
+        try:
+           requests.get("https://jarvis-bot-89mc.onrender.com")
+        except:
+            pass
+        time.sleep(600)
+
+
+Thread(target=keep_alive).start()
 bot.polling()
