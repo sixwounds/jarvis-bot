@@ -7,12 +7,12 @@ from flask import Flask
 from telebot import TeleBot, types
 from dotenv import load_dotenv
 from nlp_providers import GPTProvider, GeminiProvider, GigaChatProvider
+from db import get_dialog, add_message, reset_dialog
 
 load_dotenv()
 
 bot = TeleBot(os.getenv("TELEGRAM_TOKEN"))
 
-dialogs = {}
 user_models = {}
 
 providers = {
@@ -31,17 +31,15 @@ def index():
 
 
 def system_prompt():
-    return {
-        "role": "system",
-        "content": "Тебя зовут Джарвис. Ты умный, харизматичный ассистент. Общайся уверенно и по делу."
-    }
+    return "Тебя зовут Джарвис. Ты умный, харизматичный ассистент. Общайся уверенно и по делу."
 
 
 @bot.message_handler(commands=["start"])
 def start(message):
     uid = message.from_user.id
     user_models[uid] = "gpt"
-    dialogs[uid] = [system_prompt()]
+    reset_dialog(uid)
+    add_message(uid, "system", system_prompt())
     bot.send_message(
         message.chat.id,
         "👋 Привет! Я **Джарвис** — твой персональный AI.\n\n"
@@ -54,8 +52,9 @@ def start(message):
 
 
 @bot.message_handler(commands=["reset"])
-def reset_dialog(message):
-    dialogs[message.from_user.id] = [system_prompt()]
+def reset_memory(message):
+    reset_dialog(message.from_user.id)
+    add_message(message.from_user.id, "system", system_prompt())
     bot.send_message(message.chat.id, "🧠 Память очищена")
 
 
@@ -97,20 +96,24 @@ def chat(message):
         bot.send_message(message.chat.id, str(datetime.now().year))
         return
 
-    dialogs.setdefault(uid, [system_prompt()])
     user_models.setdefault(uid, "gpt")
 
-    dialogs[uid].append({"role": "user", "content": message.text})
-    dialogs[uid] = dialogs[uid][-MAX_HISTORY:]
+    history = get_dialog(uid)
+    if not history:
+        add_message(uid, "system", system_prompt())
+        history = get_dialog(uid)
+
+    add_message(uid, "user", message.text)
+    history = get_dialog(uid)[-MAX_HISTORY:]
 
     provider = providers[user_models[uid]]
 
     try:
-        answer = provider.generate(dialogs[uid])
+        answer = provider.generate(history)
     except Exception as e:
         answer = f"Ошибка API: {e}"
 
-    dialogs[uid].append({"role": "assistant", "content": answer})
+    add_message(uid, "assistant", answer)
     bot.send_message(message.chat.id, answer)
 
 
