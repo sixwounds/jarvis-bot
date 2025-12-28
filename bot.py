@@ -142,5 +142,13 @@ def run_flask():
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
 
+import time
+
 Thread(target=run_flask).start()
-bot.polling()
+
+while True:
+    try:
+        bot.polling(none_stop=True)
+    except Exception as e:
+        print("Polling crashed:", e)
+        time.sleep(5)
