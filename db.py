@@ -1,6 +1,7 @@
 import sqlite3
 from threading import Lock
 from datetime import datetime
+import time
 
 lock = Lock()
 conn = sqlite3.connect("dialog.db", check_same_thread=False)
@@ -49,7 +50,6 @@ def inc_today_count(uid):
 
 
 def daily_reset_loop():
-    import time
     while True:
         today = datetime.now().strftime("%Y-%m-%d")
         with lock:
