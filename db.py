@@ -1,82 +1,58 @@
 import sqlite3
-import time
-from datetime import datetime, timedelta
+from threading import Lock
+from datetime import datetime
 
-conn = sqlite3.connect("memory.db", check_same_thread=False)
+lock = Lock()
+conn = sqlite3.connect("dialog.db", check_same_thread=False)
 cur = conn.cursor()
 
-cur.execute("""
-CREATE TABLE IF NOT EXISTS dialogs (
-    user_id INTEGER,
-    role TEXT,
-    content TEXT,
-    created TEXT DEFAULT CURRENT_TIMESTAMP
-)
-""")
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS daily_limits (
-    user_id INTEGER PRIMARY KEY,
-    count INTEGER DEFAULT 0,
-    day TEXT
-)
-""")
+cur.execute("CREATE TABLE IF NOT EXISTS dialog (user_id INTEGER, role TEXT, content TEXT)")
+cur.execute("CREATE TABLE IF NOT EXISTS daily (user_id INTEGER PRIMARY KEY, count INTEGER, day TEXT)")
 conn.commit()
 
 
-def get_dialog(user_id):
-    cur.execute("SELECT role, content FROM dialogs WHERE user_id=?", (user_id,))
-    return [{"role": r, "content": c} for r, c in cur.fetchall()]
+def get_dialog(uid):
+    with lock:
+        cur.execute("SELECT role, content FROM dialog WHERE user_id=?", (uid,))
+        return [{"role": r, "content": c} for r, c in cur.fetchall()]
 
 
-def add_message(user_id, role, content):
-    cur.execute(
-        "INSERT INTO dialogs (user_id, role, content) VALUES (?, ?, ?)",
-        (user_id, role, content)
-    )
-    conn.commit()
-
-
-def reset_dialog(user_id):
-    cur.execute("DELETE FROM dialogs WHERE user_id=?", (user_id,))
-    conn.commit()
-
-
-def get_today_count(user_id):
-    today = datetime.now().strftime("%Y-%m-%d")
-    cur.execute("SELECT count, day FROM daily_limits WHERE user_id=?", (user_id,))
-    row = cur.fetchone()
-
-    if not row or row[1] != today:
-        cur.execute(
-            "REPLACE INTO daily_limits (user_id, count, day) VALUES (?, 0, ?)",
-            (user_id, today)
-        )
+def add_message(uid, role, content):
+    with lock:
+        cur.execute("INSERT INTO dialog VALUES (?, ?, ?)", (uid, role, content))
         conn.commit()
-        return 0
-
-    return row[0]
 
 
-def inc_today_count(user_id):
+def reset_dialog(uid):
+    with lock:
+        cur.execute("DELETE FROM dialog WHERE user_id=?", (uid,))
+        conn.commit()
+
+
+def get_today_count(uid):
     today = datetime.now().strftime("%Y-%m-%d")
-    count = get_today_count(user_id) + 1
-    cur.execute(
-        "REPLACE INTO daily_limits (user_id, count, day) VALUES (?, ?, ?)",
-        (user_id, count, today)
-    )
-    conn.commit()
+    with lock:
+        cur.execute("SELECT count FROM daily WHERE user_id=? AND day=?", (uid, today))
+        row = cur.fetchone()
+        return row[0] if row else 0
 
 
-def reset_all_limits():
+def inc_today_count(uid):
     today = datetime.now().strftime("%Y-%m-%d")
-    cur.execute("UPDATE daily_limits SET count=0, day=?", (today,))
-    conn.commit()
+    with lock:
+        cur.execute("SELECT count FROM daily WHERE user_id=? AND day=?", (uid, today))
+        if cur.fetchone():
+            cur.execute("UPDATE daily SET count=count+1 WHERE user_id=?", (uid,))
+        else:
+            cur.execute("INSERT INTO daily VALUES (?, ?, ?)", (uid, 1, today))
+        conn.commit()
 
 
 def daily_reset_loop():
+    import time
     while True:
-        now = datetime.now()
-        tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        time.sleep((tomorrow - now).total_seconds())
-        reset_all_limits()
+        today = datetime.now().strftime("%Y-%m-%d")
+        with lock:
+            cur.execute("DELETE FROM daily WHERE day!=?", (today,))
+            conn.commit()
+        time.sleep(3600)
