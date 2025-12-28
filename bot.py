@@ -3,6 +3,7 @@ import time
 import requests
 from datetime import datetime
 from threading import Thread
+from flask import Flask
 from telebot import TeleBot, types
 from dotenv import load_dotenv
 from nlp_providers import GPTProvider, GeminiProvider, GigaChatProvider
@@ -22,6 +23,12 @@ providers = {
 
 MAX_HISTORY = 12
 
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    return "Jarvis is alive"
+
 
 def system_prompt():
     return {
@@ -38,9 +45,6 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "👋 Привет! Я **Джарвис** — твой персональный AI.\n\n"
-        "Что я умею:\n"
-        "• отвечать как GPT, Gemini или GigaChat\n"
-        "• рисовать через Kandinsky\n\n"
         "Команды:\n"
         "/model — выбрать нейросеть\n"
         "/draw <описание> — создать изображение\n"
@@ -110,14 +114,9 @@ def chat(message):
     bot.send_message(message.chat.id, answer)
 
 
-def keep_alive():
-    while True:
-        try:
-           requests.get("https://jarvis-bot-89mc.onrender.com")
-        except:
-            pass
-        time.sleep(600)
+def run_flask():
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
 
-Thread(target=keep_alive).start()
+Thread(target=run_flask).start()
 bot.polling()
