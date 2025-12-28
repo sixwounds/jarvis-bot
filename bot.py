@@ -96,16 +96,18 @@ def voice_handler(message):
     file_info = bot.get_file(message.voice.file_id)
     downloaded = bot.download_file(file_info.file_path)
 
-    with open("voice.ogg", "wb") as f:
+    path = f"voice_{message.from_user.id}.ogg"
+    with open(path, "wb") as f:
         f.write(downloaded)
 
-    os.system("ffmpeg -y -i voice.ogg voice.wav")
+    try:
+        text = voice_to_text(path)
+        bot.send_message(message.chat.id, f"🎙 Ты сказал:\n{text}")
+        message.text = text
+        chat(message)
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Ошибка распознавания: {e}")
 
-    text = voice_to_text("voice.wav")
-    bot.send_message(message.chat.id, f"🎙 Ты сказал:\n{text}")
-
-    message.text = text
-    chat(message)
 
 
 @bot.message_handler(func=lambda msg: True)
