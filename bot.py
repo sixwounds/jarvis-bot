@@ -31,7 +31,14 @@ def index():
 
 
 def system_prompt():
-    return "Тебя зовут Джарвис. Ты умный, харизматичный ассистент. Общайся уверенно и по делу."
+    return (
+        "Тебя зовут Джарвис.\n"
+        "Ты харизматичный, дружелюбный, живой ассистент, который говорит на 'ты'.\n"
+        "Ты никогда не называешь себя моделью, нейросетью, ИИ, GPT, GigaChat или Gemini.\n"
+        "Ты — единый персонаж.\n"
+        "Общайся свободно, уверенно, иногда шути, будь тёплым и разговорчивым.\n"
+        "Помогай, советуй, поддерживай диалог как хороший знакомый."
+    )
 
 
 @bot.message_handler(commands=["start"])
@@ -40,8 +47,10 @@ def start(message):
     user_models[uid] = "gpt"
     reset_dialog(uid)
     add_message(uid, "system", system_prompt())
-    bot.send_message(message.chat.id,
-        "👋 Привет! Я Джарвис.\n\n"
+    bot.send_message(
+        message.chat.id,
+        "👋 Привет! Я Джарвис — твой персональный помощник.\n\n"
+        "Можем просто поболтать или заняться делом.\n\n"
         "/model — выбрать нейросеть\n"
         "/stats — статистика\n"
         "/limits — правила\n"
@@ -54,17 +63,19 @@ def stats(message):
     uid = message.from_user.id
     used = get_today_count(uid)
     if uid in ADMIN_IDS:
-        bot.send_message(message.chat.id, f"Ты администратор. Использовано сегодня: {used}")
+        bot.send_message(message.chat.id, f"Ты сегодня написал {used} сообщений. У тебя безлимит 😎")
     else:
-        bot.send_message(message.chat.id, f"Использовано сегодня: {used}/{DAILY_LIMIT}")
+        bot.send_message(message.chat.id, f"Сегодня ты использовал {used} из {DAILY_LIMIT} сообщений.")
 
 
 @bot.message_handler(commands=["limits"])
 def limits(message):
-    bot.send_message(message.chat.id,
-        f"Лимит: {DAILY_LIMIT} сообщений в сутки\n"
-        "Администратор — безлимит\n"
-        "Обновление лимитов каждый день в 00:00"
+    bot.send_message(
+        message.chat.id,
+        f"📜 Правила простые:\n"
+        f"• {DAILY_LIMIT} сообщений в сутки\n"
+        "• лимиты обнуляются каждый день в 00:00\n"
+        "• у администратора — безлимит"
     )
 
 
@@ -72,7 +83,7 @@ def limits(message):
 def reset_memory(message):
     reset_dialog(message.from_user.id)
     add_message(message.from_user.id, "system", system_prompt())
-    bot.send_message(message.chat.id, "🧠 Память очищена.")
+    bot.send_message(message.chat.id, "🧠 Всё, начинаем с чистого листа.")
 
 
 @bot.message_handler(commands=["model"])
@@ -80,13 +91,13 @@ def choose_model(message):
     kb = types.InlineKeyboardMarkup()
     for m in providers:
         kb.add(types.InlineKeyboardButton(text=m.upper(), callback_data=m))
-    bot.send_message(message.chat.id, "Выбери модель:", reply_markup=kb)
+    bot.send_message(message.chat.id, "Выбери, с кем сегодня болтаем:", reply_markup=kb)
 
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
     user_models[call.from_user.id] = call.data
-    bot.answer_callback_query(call.id, f"Активна модель: {call.data.upper()}")
+    bot.answer_callback_query(call.id, f"Теперь с тобой общается: {call.data.upper()}")
 
 
 @bot.message_handler(func=lambda msg: True)
@@ -94,7 +105,7 @@ def chat(message):
     uid = message.from_user.id
 
     if uid not in ADMIN_IDS and get_today_count(uid) >= DAILY_LIMIT:
-        bot.send_message(message.chat.id, "🚫 Лимит сообщений исчерпан.")
+        bot.send_message(message.chat.id, "🚫 Лимит на сегодня закончился. Загляни завтра 😉")
         return
 
     user_models.setdefault(uid, "gpt")
@@ -110,7 +121,7 @@ def chat(message):
     try:
         answer = providers[user_models[uid]].generate(history)
     except Exception as e:
-        answer = f"Ошибка: {e}"
+        answer = f"Хм, что-то пошло не так: {e}"
 
     add_message(uid, "assistant", answer)
     bot.send_message(message.chat.id, answer)
