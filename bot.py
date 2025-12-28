@@ -1,13 +1,11 @@
 import os
-import time
 from threading import Thread
 from flask import Flask
 from telebot import TeleBot, types
 from dotenv import load_dotenv
 
 from nlp_providers import GPTProvider, GeminiProvider, GigaChatProvider
-from db import get_dialog, add_message, reset_dialog, count_today_messages
-from utils import voice_to_text
+from db import get_dialog, add_message, reset_dialog, get_today_count, inc_today_count, daily_reset_loop
 
 load_dotenv()
 
@@ -42,11 +40,9 @@ def start(message):
     user_models[uid] = "gpt"
     reset_dialog(uid)
     add_message(uid, "system", system_prompt())
-    bot.send_message(
-        message.chat.id,
+    bot.send_message(message.chat.id,
         "👋 Привет! Я Джарвис.\n\n"
         "/model — выбрать нейросеть\n"
-        "/draw <описание> — нарисовать\n"
         "/stats — статистика\n"
         "/limits — правила\n"
         "/reset — очистить память"
@@ -56,17 +52,19 @@ def start(message):
 @bot.message_handler(commands=["stats"])
 def stats(message):
     uid = message.from_user.id
-    used = count_today_messages(uid)
+    used = get_today_count(uid)
     if uid in ADMIN_IDS:
         bot.send_message(message.chat.id, f"Ты администратор. Использовано сегодня: {used}")
     else:
-        bot.send_message(message.chat.id, f"Использовано: {used}/{DAILY_LIMIT}")
+        bot.send_message(message.chat.id, f"Использовано сегодня: {used}/{DAILY_LIMIT}")
 
 
 @bot.message_handler(commands=["limits"])
 def limits(message):
     bot.send_message(message.chat.id,
-        f"Лимит: {DAILY_LIMIT} сообщений в сутки\nАдминистратор — безлимит"
+        f"Лимит: {DAILY_LIMIT} сообщений в сутки\n"
+        "Администратор — безлимит\n"
+        "Обновление лимитов каждый день в 00:00"
     )
 
 
@@ -74,7 +72,7 @@ def limits(message):
 def reset_memory(message):
     reset_dialog(message.from_user.id)
     add_message(message.from_user.id, "system", system_prompt())
-    bot.send_message(message.chat.id, "Память очищена.")
+    bot.send_message(message.chat.id, "🧠 Память очищена.")
 
 
 @bot.message_handler(commands=["model"])
@@ -91,30 +89,11 @@ def callback(call):
     bot.answer_callback_query(call.id, f"Активна модель: {call.data.upper()}")
 
 
-@bot.message_handler(content_types=["voice"])
-def voice_handler(message):
-    file_info = bot.get_file(message.voice.file_id)
-    downloaded = bot.download_file(file_info.file_path)
-
-    path = f"voice_{message.from_user.id}.ogg"
-    with open(path, "wb") as f:
-        f.write(downloaded)
-
-    try:
-        text = voice_to_text(path)
-        bot.send_message(message.chat.id, f"🎙 Ты сказал:\n{text}")
-        message.text = text
-        chat(message)
-    except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка распознавания: {e}")
-
-
-
 @bot.message_handler(func=lambda msg: True)
 def chat(message):
     uid = message.from_user.id
 
-    if uid not in ADMIN_IDS and count_today_messages(uid) >= DAILY_LIMIT:
+    if uid not in ADMIN_IDS and get_today_count(uid) >= DAILY_LIMIT:
         bot.send_message(message.chat.id, "🚫 Лимит сообщений исчерпан.")
         return
 
@@ -125,6 +104,7 @@ def chat(message):
         add_message(uid, "system", system_prompt())
 
     add_message(uid, "user", message.text)
+    inc_today_count(uid)
     history = get_dialog(uid)[-MAX_HISTORY:]
 
     try:
@@ -136,12 +116,7 @@ def chat(message):
     bot.send_message(message.chat.id, answer)
 
 
-def run_flask():
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-
-
-Thread(target=run_flask).start()
-
 if __name__ == "__main__":
-    Thread(target=run_flask).start()
+    Thread(target=daily_reset_loop, daemon=True).start()
+    Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000))), daemon=True).start()
     bot.infinity_polling(timeout=60, long_polling_timeout=60)

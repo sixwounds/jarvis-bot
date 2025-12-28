@@ -1,5 +1,6 @@
 import sqlite3
-from datetime import date
+import time
+from datetime import datetime, timedelta
 
 conn = sqlite3.connect("memory.db", check_same_thread=False)
 cur = conn.cursor()
@@ -9,7 +10,15 @@ CREATE TABLE IF NOT EXISTS dialogs (
     user_id INTEGER,
     role TEXT,
     content TEXT,
-    created DATE DEFAULT CURRENT_DATE
+    created TEXT DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS daily_limits (
+    user_id INTEGER PRIMARY KEY,
+    count INTEGER DEFAULT 0,
+    day TEXT
 )
 """)
 conn.commit()
@@ -33,10 +42,41 @@ def reset_dialog(user_id):
     conn.commit()
 
 
-def count_today_messages(user_id):
-    today = str(date.today())
-    cur.execute("""
-        SELECT COUNT(*) FROM dialogs
-        WHERE user_id=? AND role='user' AND created=?
-    """, (user_id, today))
-    return cur.fetchone()[0]
+def get_today_count(user_id):
+    today = datetime.now().strftime("%Y-%m-%d")
+    cur.execute("SELECT count, day FROM daily_limits WHERE user_id=?", (user_id,))
+    row = cur.fetchone()
+
+    if not row or row[1] != today:
+        cur.execute(
+            "REPLACE INTO daily_limits (user_id, count, day) VALUES (?, 0, ?)",
+            (user_id, today)
+        )
+        conn.commit()
+        return 0
+
+    return row[0]
+
+
+def inc_today_count(user_id):
+    today = datetime.now().strftime("%Y-%m-%d")
+    count = get_today_count(user_id) + 1
+    cur.execute(
+        "REPLACE INTO daily_limits (user_id, count, day) VALUES (?, ?, ?)",
+        (user_id, count, today)
+    )
+    conn.commit()
+
+
+def reset_all_limits():
+    today = datetime.now().strftime("%Y-%m-%d")
+    cur.execute("UPDATE daily_limits SET count=0, day=?", (today,))
+    conn.commit()
+
+
+def daily_reset_loop():
+    while True:
+        now = datetime.now()
+        tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        time.sleep((tomorrow - now).total_seconds())
+        reset_all_limits()
