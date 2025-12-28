@@ -1,19 +1,23 @@
 import os
-from datetime import datetime
+import time
 from threading import Thread
 from flask import Flask
 from telebot import TeleBot, types
 from dotenv import load_dotenv
+
 from nlp_providers import GPTProvider, GeminiProvider, GigaChatProvider
 from db import get_dialog, add_message, reset_dialog, count_today_messages
+from utils import voice_to_text
 
 load_dotenv()
 
 bot = TeleBot(os.getenv("TELEGRAM_TOKEN"))
 
-user_models = {}
 ADMIN_IDS = [832410474]
 DAILY_LIMIT = 40
+MAX_HISTORY = 12
+
+user_models = {}
 
 providers = {
     "gpt": GPTProvider(),
@@ -21,7 +25,6 @@ providers = {
     "gigachat": GigaChatProvider()
 }
 
-MAX_HISTORY = 12
 app = Flask(__name__)
 
 @app.route("/")
@@ -41,13 +44,12 @@ def start(message):
     add_message(uid, "system", system_prompt())
     bot.send_message(
         message.chat.id,
-        "👋 Привет! Я **Джарвис**.\n\n"
+        "👋 Привет! Я Джарвис.\n\n"
         "/model — выбрать нейросеть\n"
         "/draw <описание> — нарисовать\n"
         "/stats — статистика\n"
         "/limits — правила\n"
-        "/reset — очистить память",
-        parse_mode="Markdown"
+        "/reset — очистить память"
     )
 
 
@@ -56,20 +58,15 @@ def stats(message):
     uid = message.from_user.id
     used = count_today_messages(uid)
     if uid in ADMIN_IDS:
-        bot.send_message(message.chat.id, f"Ты администратор. Использовано сегодня: {used} сообщений.")
+        bot.send_message(message.chat.id, f"Ты администратор. Использовано сегодня: {used}")
     else:
-        left = max(0, DAILY_LIMIT - used)
-        bot.send_message(message.chat.id, f"Использовано сегодня: {used}/{DAILY_LIMIT}. Осталось: {left}.")
+        bot.send_message(message.chat.id, f"Использовано: {used}/{DAILY_LIMIT}")
 
 
 @bot.message_handler(commands=["limits"])
 def limits(message):
-    bot.send_message(
-        message.chat.id,
-        "📜 Правила использования:\n\n"
-        f"• Лимит: {DAILY_LIMIT} сообщений в сутки\n"
-        "• Администратор — безлимит\n"
-        "• Лимиты обновляются каждый день"
+    bot.send_message(message.chat.id,
+        f"Лимит: {DAILY_LIMIT} сообщений в сутки\nАдминистратор — безлимит"
     )
 
 
@@ -77,7 +74,7 @@ def limits(message):
 def reset_memory(message):
     reset_dialog(message.from_user.id)
     add_message(message.from_user.id, "system", system_prompt())
-    bot.send_message(message.chat.id, "🧠 Память очищена")
+    bot.send_message(message.chat.id, "Память очищена.")
 
 
 @bot.message_handler(commands=["model"])
@@ -94,19 +91,21 @@ def callback(call):
     bot.answer_callback_query(call.id, f"Активна модель: {call.data.upper()}")
 
 
-@bot.message_handler(commands=["draw"])
-def draw(message):
-    prompt = message.text.replace("/draw", "").strip()
-    if not prompt:
-        bot.send_message(message.chat.id, "Напиши описание после /draw")
-        return
+@bot.message_handler(content_types=["voice"])
+def voice_handler(message):
+    file_info = bot.get_file(message.voice.file_id)
+    downloaded = bot.download_file(file_info.file_path)
 
-    bot.send_message(message.chat.id, "🎨 Рисую...")
-    try:
-        img_url = providers["gigachat"].draw(prompt)
-        bot.send_photo(message.chat.id, img_url)
-    except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка генерации: {e}")
+    with open("voice.ogg", "wb") as f:
+        f.write(downloaded)
+
+    os.system("ffmpeg -y -i voice.ogg voice.wav")
+
+    text = voice_to_text("voice.wav")
+    bot.send_message(message.chat.id, f"🎙 Ты сказал:\n{text}")
+
+    message.text = text
+    chat(message)
 
 
 @bot.message_handler(func=lambda msg: True)
@@ -114,7 +113,7 @@ def chat(message):
     uid = message.from_user.id
 
     if uid not in ADMIN_IDS and count_today_messages(uid) >= DAILY_LIMIT:
-        bot.send_message(message.chat.id, "🚫 Лимит 40 сообщений в сутки исчерпан.")
+        bot.send_message(message.chat.id, "🚫 Лимит сообщений исчерпан.")
         return
 
     user_models.setdefault(uid, "gpt")
@@ -122,17 +121,14 @@ def chat(message):
     history = get_dialog(uid)
     if not history:
         add_message(uid, "system", system_prompt())
-        history = get_dialog(uid)
 
     add_message(uid, "user", message.text)
     history = get_dialog(uid)[-MAX_HISTORY:]
 
-    provider = providers[user_models[uid]]
-
     try:
-        answer = provider.generate(history)
+        answer = providers[user_models[uid]].generate(history)
     except Exception as e:
-        answer = f"Ошибка API: {e}"
+        answer = f"Ошибка: {e}"
 
     add_message(uid, "assistant", answer)
     bot.send_message(message.chat.id, answer)
@@ -141,8 +137,6 @@ def chat(message):
 def run_flask():
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
-
-import time
 
 Thread(target=run_flask).start()
 
