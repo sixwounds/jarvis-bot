@@ -142,9 +142,6 @@ def run_flask():
 
 Thread(target=run_flask).start()
 
-while True:
-    try:
-        bot.polling(none_stop=True)
-    except Exception as e:
-        print("Polling crashed:", e)
-        time.sleep(5)
+if __name__ == "__main__":
+    Thread(target=run_flask).start()
+    bot.infinity_polling(timeout=60, long_polling_timeout=60)
